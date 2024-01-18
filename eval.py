@@ -153,7 +153,8 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--cfg",
-        default="config/ade20k-resnet50dilated-ppm_deepsup.yaml",
+        # default="config/ade20k-resnet50dilated-ppm_deepsup.yaml",
+        default="config/ade20k-mobilenetv2dilated-c1_deepsup.yaml",
         metavar="FILE",
         help="path to config file",
         type=str,
