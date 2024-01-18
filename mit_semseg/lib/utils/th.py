@@ -1,9 +1,9 @@
 import torch
 from torch.autograd import Variable
 import numpy as np
-import collections
+import collections.abc as collections
 
-__all__ = ['as_variable', 'as_numpy', 'mark_volatile']
+__all__ = [ 'as_variable', 'as_numpy', 'mark_volatile']
 
 def as_variable(obj):
     if isinstance(obj, Variable):

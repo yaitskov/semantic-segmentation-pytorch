@@ -8,7 +8,7 @@ except:
     from torch._C import _update_worker_pids as _set_worker_pids
 from .sampler import SequentialSampler, RandomSampler, BatchSampler
 import signal
-import collections
+import collections.abc as collections
 import re
 import sys
 import threading

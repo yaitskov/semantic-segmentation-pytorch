@@ -1,9 +1,7 @@
-# -*- coding: utf8 -*-
-
 import torch.cuda as cuda
 import torch.nn as nn
 import torch
-import collections
+import collections.abc as collections
 from torch.nn.parallel._functions import Gather
 
 
