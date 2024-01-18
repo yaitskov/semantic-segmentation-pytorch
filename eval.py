@@ -53,7 +53,7 @@ def evaluate(segmentation_module, loader, cfg, gpu):
         seg_label = as_numpy(batch_data['seg_label'][0])
         img_resized_list = batch_data['img_data']
 
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()
         tic = time.perf_counter()
         with torch.no_grad():
             segSize = (seg_label.shape[0], seg_label.shape[1])
@@ -74,7 +74,7 @@ def evaluate(segmentation_module, loader, cfg, gpu):
             _, pred = torch.max(scores, dim=1)
             pred = as_numpy(pred.squeeze(0).cpu())
 
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()
         time_meter.update(time.perf_counter() - tic)
 
         # calculate accuracy
@@ -105,7 +105,10 @@ def evaluate(segmentation_module, loader, cfg, gpu):
 
 
 def main(cfg, gpu):
-    torch.cuda.set_device(gpu)
+    # try:
+    #     torch.cuda.set_device(gpu)
+    # except AttributeError as e:
+    #     print(f"Ignore failed set_device: {e}")
 
     # Network Builders
     net_encoder = ModelBuilder.build_encoder(
@@ -136,7 +139,7 @@ def main(cfg, gpu):
         num_workers=5,
         drop_last=True)
 
-    segmentation_module.cuda()
+    # segmentation_module.cuda()
 
     # Main loop
     evaluate(segmentation_module, loader_val, cfg, gpu)

@@ -12,7 +12,7 @@ __all__ = ['UserScatteredDataParallel', 'user_scattered_collate', 'async_copy_to
 
 def async_copy_to(obj, dev, main_stream=None):
     if torch.is_tensor(obj):
-        v = obj.cuda(dev, non_blocking=True)
+        v = obj # obj.cuda(dev, non_blocking=True)
         if main_stream is not None:
             v.data.record_stream(main_stream)
         return v
