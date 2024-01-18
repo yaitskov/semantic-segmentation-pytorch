@@ -188,8 +188,8 @@ if __name__ == '__main__':
         cfg.DIR, 'encoder_' + cfg.VAL.checkpoint)
     cfg.MODEL.weights_decoder = os.path.join(
         cfg.DIR, 'decoder_' + cfg.VAL.checkpoint)
-    assert os.path.exists(cfg.MODEL.weights_encoder) and \
-        os.path.exists(cfg.MODEL.weights_decoder), "checkpoint does not exitst!"
+    assert os.path.exists(cfg.MODEL.weights_encoder), f"checkpoint {cfg.MODEL.weights_encoder} does not exitst!"
+    assert os.path.exists(cfg.MODEL.weights_decoder), f"checkpoint {cfg.MODEL.weights_decoder} does not exitst!"
 
     if not os.path.isdir(os.path.join(cfg.DIR, "result")):
         os.makedirs(os.path.join(cfg.DIR, "result"))
