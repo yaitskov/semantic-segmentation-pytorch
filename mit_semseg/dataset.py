@@ -18,6 +18,10 @@ def imresize(im, size, interp='bilinear'):
 
     return im.resize(size, resample)
 
+# mean and std
+normalize = transforms.Normalize(
+  mean=[0.485, 0.456, 0.406],
+  std=[0.229, 0.224, 0.225])
 
 class BaseDataset(torch.utils.data.Dataset):
     def __init__(self, odgt, opt, **kwargs):
@@ -29,11 +33,6 @@ class BaseDataset(torch.utils.data.Dataset):
 
         # parse the input list
         self.parse_input_list(odgt, **kwargs)
-
-        # mean and std
-        self.normalize = transforms.Normalize(
-            mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225])
 
     def parse_input_list(self, odgt, max_sample=-1, start_idx=-1, end_idx=-1):
         if isinstance(odgt, list):
@@ -50,22 +49,21 @@ class BaseDataset(torch.utils.data.Dataset):
         assert self.num_sample > 0
         print('# samples: {}'.format(self.num_sample))
 
-    def img_transform(self, img):
-        # 0-255 to 0-1
-        img = np.float32(np.array(img)) / 255.
-        img = img.transpose((2, 0, 1))
-        img = self.normalize(torch.from_numpy(img.copy()))
-        return img
-
     def segm_transform(self, segm):
         # to tensor, -1 to 149
         segm = torch.from_numpy(np.array(segm)).long() - 1
         return segm
 
-    # Round x to the nearest multiple of p and x' >= x
-    def round2nearest_multiple(self, x, p):
-        return ((x - 1) // p + 1) * p
+def img_transform(img):
+  # 0-255 to 0-1
+  img = np.float32(np.array(img)) / 255.
+  img = img.transpose((2, 0, 1))
+  img = normalize(torch.from_numpy(img.copy()))
+  return img
 
+# Round x to the nearest multiple of p and x' >= x
+def round2nearest_multiple(x, p):
+    return ((x - 1) // p + 1) * p
 
 class TrainDataset(BaseDataset):
     def __init__(self, root_dataset, odgt, opt, batch_per_gpu=1, **kwargs):
@@ -138,8 +136,8 @@ class TrainDataset(BaseDataset):
         # Here we must pad both input image and segmentation map to size h' and w' so that p | h' and p | w'
         batch_width = np.max(batch_widths)
         batch_height = np.max(batch_heights)
-        batch_width = int(self.round2nearest_multiple(batch_width, self.padding_constant))
-        batch_height = int(self.round2nearest_multiple(batch_height, self.padding_constant))
+        batch_width = int(round2nearest_multiple(batch_width, self.padding_constant))
+        batch_height = int(round2nearest_multiple(batch_height, self.padding_constant))
 
         assert self.padding_constant >= self.segm_downsampling_rate, \
             'padding constant must be equal or large than segm downsamping rate'
@@ -173,8 +171,8 @@ class TrainDataset(BaseDataset):
             segm = imresize(segm, (batch_widths[i], batch_heights[i]), interp='nearest')
 
             # further downsample seg label, need to avoid seg label misalignment
-            segm_rounded_width = self.round2nearest_multiple(segm.size[0], self.segm_downsampling_rate)
-            segm_rounded_height = self.round2nearest_multiple(segm.size[1], self.segm_downsampling_rate)
+            segm_rounded_width = round2nearest_multiple(segm.size[0], self.segm_downsampling_rate)
+            segm_rounded_height = round2nearest_multiple(segm.size[1], self.segm_downsampling_rate)
             segm_rounded = Image.new('L', (segm_rounded_width, segm_rounded_height), 0)
             segm_rounded.paste(segm, (0, 0))
             segm = imresize(
@@ -202,6 +200,24 @@ class TrainDataset(BaseDataset):
         return int(1e10) # It's a fake length due to the trick that every loader maintains its own list
         #return self.num_sampleclass
 
+def massageImage(img, imgMaxSize, targetSize, padding_constant):
+  ori_width, ori_height = img.size
+  this_short_size = targetSize
+  # calculate target height and width
+  scale = min(this_short_size / float(min(ori_height, ori_width)),
+              imgMaxSize / float(max(ori_height, ori_width)))
+  target_height, target_width = int(ori_height * scale), int(ori_width * scale)
+
+  # to avoid rounding in network
+  target_width = round2nearest_multiple(target_width, padding_constant)
+  target_height = round2nearest_multiple(target_height, padding_constant)
+
+  # resize images
+  img_resized = imresize(img, (target_width, target_height), interp='bilinear')
+
+  # image transform, to torch float tensor 3xHxW
+  img_resized = img_transform(img_resized)
+  return torch.unsqueeze(img_resized, 0)
 
 class ValDataset(BaseDataset):
     def __init__(self, root_dataset, odgt, opt, **kwargs):
@@ -219,26 +235,13 @@ class ValDataset(BaseDataset):
         assert(img.size[0] == segm.size[0])
         assert(img.size[1] == segm.size[1])
 
-        ori_width, ori_height = img.size
-
         img_resized_list = []
         for this_short_size in self.imgSizes:
-            # calculate target height and width
-            scale = min(this_short_size / float(min(ori_height, ori_width)),
-                        self.imgMaxSize / float(max(ori_height, ori_width)))
-            target_height, target_width = int(ori_height * scale), int(ori_width * scale)
-
-            # to avoid rounding in network
-            target_width = self.round2nearest_multiple(target_width, self.padding_constant)
-            target_height = self.round2nearest_multiple(target_height, self.padding_constant)
-
-            # resize images
-            img_resized = imresize(img, (target_width, target_height), interp='bilinear')
-
-            # image transform, to torch float tensor 3xHxW
-            img_resized = self.img_transform(img_resized)
-            img_resized = torch.unsqueeze(img_resized, 0)
-            img_resized_list.append(img_resized)
+            img_resized_list.append(
+              massageImage(
+                img, self.imgMaxSize,
+                this_short_size,
+                self.padding_constant))
 
         # segm transform, to torch long tensor HxW
         segm = self.segm_transform(segm)

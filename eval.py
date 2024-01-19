@@ -1,16 +1,18 @@
 # System libs
+from pathlib import Path
 import os
 import time
 import argparse
 from distutils.version import LooseVersion
 # Numerical libs
 import numpy as np
+import shutil
 import torch
 import torch.nn as nn
 from scipy.io import loadmat
 # Our libs
 from mit_semseg.config import cfg
-from mit_semseg.dataset import ValDataset
+from mit_semseg.dataset import ValDataset, massageImage
 from mit_semseg.models import ModelBuilder, SegmentationModule
 from mit_semseg.utils import AverageMeter, colorEncode, accuracy, intersectionAndUnion, setup_logger
 from mit_semseg.lib.nn import user_scattered_collate, async_copy_to
@@ -38,6 +40,53 @@ def visualize_result(data, pred, dir_result):
     Image.fromarray(im_vis).save(os.path.join(dir_result, img_name.replace('.jpg', '.png')))
 
 
+def doSegmentation(model, imgPath):
+  model.eval()
+
+  img = Image.open(imgPath).convert('RGB')
+  # preparedImgs = []
+  segSize = img.size
+  segSize = segSize[1], segSize[0]
+  imgSizes = [300, 375, 450, 525, 600]
+  with torch.no_grad():
+    scores = torch.zeros(1, 150, segSize[0], segSize[1])
+    for targetSize in imgSizes:
+      preparedImgs = massageImage(img, imgMaxSize=1000, targetSize=targetSize, padding_constant=8)
+      scores_tmp = model({'img_data': preparedImgs.contiguous()}, segSize=segSize) #(300, 300))
+      scores = scores + scores_tmp / len(cfg.DATASET.imgSizes)
+      # print(f"segSize {segSize} for image {img.size}")
+
+    _, pred = torch.max(scores, dim=1)
+    pred = pred.squeeze(0).numpy()
+
+    # shutil.rmtree("layers")
+    os.makedirs("layers", exist_ok = True)
+    print(f"Segmented tensor info: shape = {pred.shape} type = {pred.dtype}")
+
+    pred_color = colorEncode(pred, colors)
+
+    # aggregate images and save
+    im_vis = pred_color.astype(np.uint8) # np.concatenate((img, seg_color, pred_color),
+                         #   axis=1).astype(np.uint8)
+
+    # img_name = info.split('/')[-1]
+    Image.fromarray(im_vis).save(f"layers/{Path(imgPath).stem}.png")
+
+    # print(f"colored {pred_color.dtype} {pred_color.shape} <> {pred.dtype} {pred.shape}")
+    #print(f"pred_color histogram: {np.histogram(pred_color, 20)}")
+    print(f"pred histogram: {np.histogram(pred, range(150))}")
+
+    #img = Image.frombytes(mode='L', size=segSize, data=pred.reshape(-1).numpy())
+    #img.save(f"layers/{os.path.basename(imgPath)}.png")
+    #img.close()
+
+    img = Image.fromarray(
+      (pred.astype(np.float32) * (255.0 / pred.max())).astype(np.uint8),
+      mode='L'
+      )
+    img.save(f"layers/{os.path.basename(imgPath)}.gray.png")
+    img.close()
+
 def evaluate(segmentation_module, loader, cfg, gpu):
     acc_meter = AverageMeter()
     intersection_meter = AverageMeter()
@@ -58,21 +107,21 @@ def evaluate(segmentation_module, loader, cfg, gpu):
         with torch.no_grad():
             segSize = (seg_label.shape[0], seg_label.shape[1])
             scores = torch.zeros(1, cfg.DATASET.num_class, segSize[0], segSize[1])
-            scores = async_copy_to(scores, gpu)
+            # scores = async_copy_to(scores, gpu)
 
             for img in img_resized_list:
                 feed_dict = batch_data.copy()
                 feed_dict['img_data'] = img
                 del feed_dict['img_ori']
                 del feed_dict['info']
-                feed_dict = async_copy_to(feed_dict, gpu)
+                # feed_dict = async_copy_to(feed_dict, gpu)
 
                 # forward pass
                 scores_tmp = segmentation_module(feed_dict, segSize=segSize)
                 scores = scores + scores_tmp / len(cfg.DATASET.imgSizes)
 
             _, pred = torch.max(scores, dim=1)
-            pred = as_numpy(pred.squeeze(0).cpu())
+            pred = as_numpy(pred.squeeze(0))
 
         # torch.cuda.synchronize()
         time_meter.update(time.perf_counter() - tic)
@@ -126,25 +175,29 @@ def main(cfg, gpu):
 
     segmentation_module = SegmentationModule(net_encoder, net_decoder, crit)
 
-    # Dataset and Loader
-    dataset_val = ValDataset(
-        cfg.DATASET.root_dataset,
-        cfg.DATASET.list_val,
-        cfg.DATASET)
-    loader_val = torch.utils.data.DataLoader(
-        dataset_val,
-        batch_size=cfg.VAL.batch_size,
-        shuffle=False,
-        collate_fn=user_scattered_collate,
-        num_workers=5,
-        drop_last=True)
+    if args.img is None:
+      # Dataset and Loader
+      dataset_val = ValDataset(
+          cfg.DATASET.root_dataset,
+          cfg.DATASET.list_val,
+          cfg.DATASET)
+      loader_val = torch.utils.data.DataLoader(
+          dataset_val,
+          batch_size=cfg.VAL.batch_size,
+          shuffle=False,
+          collate_fn=user_scattered_collate,
+          num_workers=5,
+          drop_last=True)
 
-    # segmentation_module.cuda()
+      # segmentation_module.cuda()
 
-    # Main loop
-    evaluate(segmentation_module, loader_val, cfg, gpu)
+      # Main loop
 
-    print('Evaluation Done!')
+      evaluate(segmentation_module, loader_val, cfg, gpu)
+
+      print('Evaluation Done!')
+    else:
+      doSegmentation(segmentation_module, args.img)
 
 
 if __name__ == '__main__':
@@ -162,6 +215,10 @@ if __name__ == '__main__':
         help="path to config file",
         type=str,
     )
+    parser.add_argument(
+      "--img",
+      default=None,
+      help="path for image file for semantic segmenation")
     parser.add_argument(
         "--gpu",
         default=0,
