@@ -13,3 +13,4 @@ ADE_val*.png
 .idea/
 data/ADEChallengeData2016/
 venv
+layers
